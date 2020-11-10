@@ -1,0 +1,232 @@
+---
+author: "xiaojue zhou 62565128"
+date: "6/12/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+##Abstract
+Malaria is a transmitted disease that is very common in African Region. Current study looked at the probability of getting malaria in 12 schools and 502 children under different feeding interventions. Results showed that the probability of getting malaria decreased over time(z = -11, p<0.001), younger children tends be more at risk of getting malaria (z= -3.439, p <0.001) and followed a seasonal trend. 
+
+##Introduction
+Malaria is one of the most severe disease in developing countries. World Health Organization's World Malaria report 2017 estimated 90% of deaths due to malaria were in WHO African Region in 2016. Malaria is spread by mosquitos with parasites. Therefore, transmission of malaria depends on climate conditions, which are related to the number and survival of mosquitos. Seasonal pattern of malaria is expected due to different rainfall patterns, temperature and humidity at different time in a year.
+
+In the current study by Neumann et al, researchers were investigating how different diets can affect Kenyan children's nutrition, growth and cognitive function. They randomly assigned 12 kenyan schools with 547 children to four feeding interventions: meat, milk, energy(calorie) and control. The snacks were served in stew with groupd meat, milk, and oil. Feeding was repeated each day during the 21 months. Measurements include health status, biomchemical measures of malaria, cognitive and behavioral measures were repeated at intervals over 2 years. At the beginning of the study, 31% of the children had Malaria.
+
+##Methods
+
+Current dataset includes 505 children and 6781 measurements. Children 20, 150 and 358 were excluded due to missing age at baseline which is a variable of interest the analysis, resulting in total 502 children. 192 children completed 15 measurements across 2 years. All the children had 1 to 15 measurements (Median = 14).
+
+All the analysis were conducted in R. Because I am interested in the probability of children having malaria or not and the association to other covariates, generalized linear mixed effect modeling were used to conduct the analysis with lme4 package. All the models were compared with wald test using ANOVA. ggplot2 R package were used to generate graphs. Missing data were assessed visually(Fig. 1)to look at if the children drop out the study due to either a third variable or related to whether they had malaria or not. There is a lot less children measured at the last month in calorie, meat, or milk groups comparing to control condition. This could be problematic to the current analysis. Here I will repeat the analysis with and without the last measurement. There were in total 209 children with 14 measurements.
+
+
+```{r,message=F,warning = F, include=F}
+library(foreign)
+library(dplyr)
+library(tidyr)
+#library(lattice)
+library(ggplot2)
+library(tidyverse)
+library(lme4)
+library(merTools)
+#library(geepack)
+#library(emdbook)
+library(knitr)
+library(plotROC)
+library(effects)
+
+setwd("~/Documents/uci/2019Spring/STATS210C")
+mal <- read.delim("morbidity_class.txt",header=T)
+```
+
+```{r,message=F,echo=F,warning = F,fig.height=4,fig.width=4}
+#first plotting for the general question
+#Y: Q15 
+InMalplot = mal %>% mutate(treat = (treatment != "zcontrol"))
+#tmp = data.frame(mal %>% group_by(vn,treatment,Q15) %>% summarise(n=n()) %>% arrange(treatment,vn))
+plotin = data.frame(InMalplot %>% group_by(vn,treat,Q15) %>% summarise(n=n())) %>% mutate(Q15 = as.factor(Q15)) %>% arrange(treat,Q15,vn)
+
+#see the total number of measurement by feeding groups, no pattern differences suspected
+plotIn_Treat = InMalplot %>% group_by(vn,treatment,Q15) %>% summarise(n=n()) %>% mutate(Q15 = as.factor(Q15))
+ggplot(plotIn_Treat, aes(x=vn, y=n, fill = Q15)) +
+  geom_bar(stat="identity",position=position_dodge()) +
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal()+
+  facet_wrap(~treatment)+
+  labs(title="Figure 1 total number of children in each intervention group",x="visit number",y="number of children") + 
+  scale_fill_discrete(name = "Malaria", labels = c("No", "Yes"))
+
+#a lot of drop out except for control group, could contribute to estimates
+#however, didn't see the Y which is the proportion of malaria different with/without treatment is different between control group and treatment group. Therefore, I am not suspecting the missing data is due to children having malaria or not depending on they received treatment or not.
+```
+
+
+##Results
+###1. Age and Gender differences and its association to probability of getting malaria.
+
+Here I am interested in whether the children's age at baseline and gender were associated with the probability of having malaria at any point in the study. By comparing model with 1) only visit number 2) visit number and children's age at baseline 3) visit number and children's gender 4) visit number, children's age at baseline and gender 5) visit number, children's age at baseline, gender and the interaction between age and gender. 
+
+Wald test indicated that age at baseline were significantly associated with odds of getting malaria after considering time trend and individual differences of risk of getting malaria(z= -3.439, p <0.001). Specifically, younger children were more likely at risk of getting malaria(Figure 2, bottom left). Also, children’s gender were significantly associated with odds of getting malaria(z = 2.01, p<0.05) and girls were at a slightly higher risk than boys at getting malaria(Figure 2, top right). However, gender effects were not significant after controlling for age and time(z=1.513, p = 0.13). This means that the differences in risk of malaria between girls and boys didn’t exist when the age is the same. 
+
+```{r,message=F,echo=F,warning = F,fig.height=4.5,fig.width=4.5}
+ModelIn_Data = mal %>% dplyr::select(vn,Q15,age_at_time0,sex,ID,sin,cos) %>% na.omit() %>% arrange(ID,vn)
+mod1_red = glmer(Q15 ~ vn+sex+age_at_time0+(1|ID), family=binomial,data=ModelIn_Data, nAGQ = 25)
+
+try.effect = predictorEffects(mod1_red)
+plot(try.effect, title = "Figure 2")
+#Figure 2 
+#age and gender is significant with/without the model 
+#however, the interaction is not significant. didn't expect age to vary with gender. as expected from the study design.
+#the random effect in age model 
+
+```
+
+
+Variance of random intercept, which is the variability of individual differences in getting malaria was large. 95% children in the current dataset had a baseline risk of malaria varies from 10% to 76.83%. 
+
+###2 Intervention effects on risk of malaria
+
+Here I am considering the model to look at whether the probability of getting malaria change over time and also whether this effect was due to the feeding intervention. By looking at figure 3, I am seeing that proportion of malaria decreased both in control and feeding intervention group over time. However, no clear differences of proportion of children had malaria between intervention and control group were shown in the graph. Graph indicating specific differences between specific intervention groups are in figure S1. 
+
+```{r,message=F,echo=F,warning = F,fig.height=4.5,fig.width=4.5}
+plot_prop = data.frame(plotin %>% group_by(vn,treat) %>% mutate(prop = n/sum(n)))
+ggplot(plot_prop %>% filter(Q15==1), aes(x=vn, y=prop, fill = treat)) +
+  geom_bar(stat="identity",position=position_dodge()) + 
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal()+
+  labs(title="Figure 3 Proportion of children had malaria in each intervention group",x="visit number",y="Proportion of malaria") 
+```
+
+
+Wald test indicated that probability of getting malaria changed over time(z = -11, p<0.001). Children tend to be less likely to get malaria over time.  However, there is not enough evidence show that the children’s odds of getting malaria were different between intervention and control group after controlling for time of measurements and also individual differences in probability of getting malaria (z=0.563, p=0.573). Also, decreased risk of malaria over time was not the effect of intervention (z = -0.872, p=0.383). 
+
+However, there were a lot more missing data in intervention groups than control group in the last measurement. After refitting the model without the last measurement, the intervention by visit number interaction term was marginally significant (z=-1.648, p = 0.099).  The intervention affect the risk of malaria in children who are in intervention group decreased more than children in control group over time(figure 4).
+
+The final fitted model without the 15th measurement is 
+$$
+Log(Y_{iJ}=1/Y_{iJ}=0) = \beta_0+ b_{i} + \beta_1V_{iJ} + \beta_2Trt_{i}  + \beta_3V_{iJ}*Trt_{i}  +  e_{iJ}
+$$
+$Y_{iJ}$ is equal to 1 if the children i had malaria at visit J and equal 0 if the children didn't have malaria, $V_{iJ}$ is the visit number, $Trt_{i}$ is equal to 1 if children i was assigned to any of intervention group and 0 if children i was assgined to control group. 
+
+```{r,message=F,echo=F,warning = F,fig.height=4.5,fig.width=4.5}
+ModelIn_15 = mal  %>% mutate(treat = (treatment != "zcontrol")) %>%
+  dplyr::select(vn,Q15,age_at_time0,sex,ID,treat,treatment) %>% filter(vn !=15) %>% na.omit() %>% arrange(ID,vn)
+mod2_full2 = glmer(Q15 ~ vn*treat+(1|ID), family=binomial,
+    data=ModelIn_15, nAGQ = 25)
+
+DataPlot = ModelIn_15 %>% mutate(modfit=fitted(mod2_full2))
+#appendix as fitted curves
+#figure 4 
+ggplot(DataPlot,aes(x=vn,y=modfit)) + 
+  geom_line(aes(group=ID,linetype = treat)) + 
+  theme_minimal()+
+  labs(title="Figure 4",x="visit number",y="Fitted probabilities of getting malaria") 
+```
+
+
+###3 Seasonal trend in probability of getting malaria
+
+Since malaria is transmitted through mosquitos and well-associate with climate conditions, I am looking at whether the probability of getting malaria were following a seasonal pattern. Current analysis transform the months into a sin and cos term by $sin(2pi*(months/12))$ and $cos(2pi*(months/12))$ and the model fitted is 
+$$
+Log(Y_{iJ}=1/Y_{iJ}=0) = \beta_0+ b_{i} + \beta_1sin(\omega*t_{iJ}) + \beta_2cos(\omega*t_{iJ})   +  e_{iJ}
+$$
+$\omega$ is equal to 1/12 and $t_{iJ}$ is the month during children i visit J. 
+
+ The log odds of getting malaria followed seasonal trend with both significant sin(z=2.504, p=0.012) and cos(2.066, p=0.039) term after controlling for individual baseline differences of probability of getting malaria. Figure 5 shows the fitted model and we can see the highest probability of getting malaria occur around September to October.  Possibly there were a lot of rainfall during summer months (July to August) and there were more mosquitos after the rainfall seasons, therefore causing the increased number of children getting malaria. 
+ 
+```{r,message=F,echo=F,warning = F,fig.height=4.5,fig.width=4.5}
+ModelIn_Data = mal %>% dplyr::select(vn,Q15,age_at_time0,sex,ID,sin,cos) %>% na.omit() %>% arrange(ID,vn)
+mod3_season = glmer(Q15 ~ sin+cos+(1|ID), family=binomial,data=ModelIn_Data, nAGQ = 25)
+#there is seasonal component. both sin and cos wave are significant here 
+#can plot fitted curve to look at seasonal trend 
+DataSeasonPlot = ModelIn_Data %>% mutate(modfit=fitted(mod3_season))
+
+#figure 5 
+ggplot(DataSeasonPlot,aes(x=vn,y=modfit)) + 
+  geom_line(aes(group=ID)) + 
+  theme_minimal()+
+  labs(title="Figure 5 Individual Seasonal Trend fitting ",x="visit number",y="Fitted probabilities of getting malaria") 
+```
+
+
+###4 Risk and proportion of malaria in control groups and general population 
+
+To investigate the probability of getting malaria in control group, I fitted the model with log odds of probability of getting malaria as response. Current study was conducted by randomly assigning intervention to 12 schools and then measured the children in each school. To estimate the fraction of children with malaria in the population, it is reasonable to include school as a covariate in the model. Seasonal components were included to take out variation due to seasonal pattern. Children’s ages at baseline were included because younger children are more vulnerable to malaria. Gender was also included because it was associated with probability of getting malaria. 
+
+So the model is vn+sex+age_at_time0+school+sin+cos
+
+$$
+Log(Y_{iJ}=1/Y_{iJ}=0) = \beta_0+ b_{i} + \beta_1V_{iJ} + \beta_2Sex_{i}  + \beta_3Age_i + \beta_4School_i +\beta_5sin(\omega*t_{iJ}) + \beta_6cos(\omega*t_{iJ}) +  e_{iJ}
+$$
+$Sex_{i}$ is equal to 1 if the children i is a girl and 0 if children i is boy. $Age_i$ is the children i age at baseline. $School_i$ is the children i school. 
+
+ROC curve and AUC(area under the curve) is a very common way to look at how good a model could predict binary responses. Figure 6 shows the model performance and the area under the curve is 76.47%. 
+```{r,message=F,echo=F,warning = F,fig.height=4.5,fig.width=4.5}
+ModelIn_Data = mal  %>% mutate(treat = (treatment != "zcontrol")) %>%
+  dplyr::select(vn,Q15,age_at_time0,sex,ID,treat,school,sin,cos) %>% na.omit() %>% arrange(ID,vn)
+ModelInDat_control = ModelIn_Data %>% filter(treat == FALSE)
+mod4_fullC = glmer(Q15 ~ vn+sex+age_at_time0+school+sin+cos+(1|ID),family=binomial,data=ModelInDat_control,nAGQ = 30)
+
+#look at if proportion of malaria is different at different school at baseline
+
+test = ModelInDat_control %>% dplyr::select(Q15,vn,ID,school) %>% mutate(modfit = fitted(mod4_fullC))
+ggplot(test, aes(d = Q15, m = modfit)) + geom_roc() + labs(title="Figure 6 Prediction performance")
+
+```
+
+
+For a 7-year-old male in the control intervention, figure 7 shows the predicted probability of malaria and the confidence interval. Due to the lack of information of this male, I cannot fit the complete model described above for prediction but rather predict the probability of malaria with a simpler model. 
+
+$$
+Log(Y_{iJ}=1/Y_{iJ}=0) = \beta_0+ b_{i} + \beta_1V_{iJ} + \beta_2Sex_{i}  + \beta_3Age_i  +  e_{iJ}
+$$
+```{r,message=F,echo=F,warning = F,fig.height=4.5,fig.width=4.5}
+mod4_control = glmer(Q15 ~ vn+sex+age_at_time0+(1|ID), family=binomial,
+    data=ModelInDat_control,nAGQ=30)
+
+kable(anova(mod4_control,mod4_fullC),caption = "table.1 time-average serum beta-carotene with dose level model coefficients")
+#use predict function to look at prediction for 7year old male in the control 
+
+#to look at how model fit using ROC for classification rate
+newdata = data.frame(vn = c(1:15),age_at_time0 = rep(7,15), ID = rep(1,15),sex = rep("boy",15))
+Predict_control = predict(mod4_control,newdata,type="response",allow.new.levels=T,re.form = ~(1|ID))
+
+test2 = ModelInDat_control %>% dplyr::select(Q15,vn) %>% mutate(modfit = fitted(mod4_control))
+#model fitting curve 
+
+##plotting the predicted value for 7year old male with confidence interval 
+plotdf <- predictInterval(mod4_control, newdata = newdata, type = "probability", 
+            stat = "median", n.sims = 1000)
+plotdf <- cbind(plotdf, newdata)
+
+ggplot(plotdf, aes(x = 1:15, y = fit)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = .15) +
+  geom_line() + 
+  ylim(c(0, 1)) + 
+  labs(title="Figure 7 7 year old male in control group ",x="visit number",y="Predicted probability of getting malaria") 
+```
+
+
+The AIC, AUC for this model is 1019.691 and 78.6%, respectively. ANOVA test of this model and the one described above indicated that the previous model is better although with worse prediction power(table 1). From the graph this male’s probability of getting malaria decrease over time and had a narrower confidence interval as well. 
+
+To estimate the fraction of children with malaria in the population, I looked at the control group in which children were not given any extra nutritional intake and intervention. Because many children had multiple malaria counts over the whole study time and the goal is estimate proportion of malaria at any time point in the future for any school, I used model’s fitted probability of each children, first averaged at each visit to have a estimated proportion of children with malaria at each measurement and then averaged over geographically different populations: schools.  The resulting estimated proportion of malaria is  7.85%. 7.85% of the children on average and at school similar to school 2, 9 and 11 have malaria. One thing to notice here is school 2’s estimated proportion of malaria is 12.9% and is much larger than school 9 (6.7%) and school 11(3.74%). Therefore, this is indicating some stratification is needed to have more realistic estimation of fraction of malaria in a general population.
+
+###Discussion
+
+The current analysis indicated that the probability of getting malaria decreased over the course of study. Younger children tend to be at greater risk at getting malaria and slight effect of intervention on decreasing the risk of malaria. 
+
+However, the proportion of children getting malaria decreased over time irrelevant to any random feeding intervention assignment. It could be that the study itself brought additional support to the school studied by possibly improving hygiene condition. Another possible reason will be since they were taking biomedical measurement in several clinic visits, they might received additional medical attention than they normally would. Also, information about whether they started treatment for malaria in those children is needed to explain the recurring malaria condition over 15 measurements for a single child. 
+
+Another issue with the current analysis is the lack of knowledge about the sampling strategy researchers used to choose schools and children among what geography area. Knowing the sampling strategy is very important for any generalization of the current results to the target population. 
+
+###Appendix
+```{r,echo=F,warning = F,fig.height=4.5,fig.width=4.5}
+plot_prop_grp =  InMalplot %>% group_by(vn,treatment,Q15) %>% summarise(n=n()) %>% mutate(Q15 = as.factor(Q15)) %>% group_by(vn,treatment) %>% mutate(prop = n/sum(n))
+ggplot(plot_prop_grp %>% filter(Q15==1), aes(x=vn, y=prop, fill = treatment)) +
+  geom_bar(stat="identity",position=position_dodge()) + 
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal()+
+  labs(title="Figure S1 Proportion of children had malaria in each intervention group",x="visit number",y="Proportion of malaria") 
+```

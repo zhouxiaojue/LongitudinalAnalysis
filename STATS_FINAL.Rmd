@@ -1,0 +1,226 @@
+---
+title: "STATS_FINAL"
+author: "xiaojue"
+date: "6/7/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r,message=F,warning = F, include=F}
+library(foreign)
+library(dplyr)
+library(tidyr)
+#library(lattice)
+library(ggplot2)
+library(tidyverse)
+library(lme4)
+library(merTools)
+#library(geepack)
+#library(emdbook)
+library(knitr)
+library(plotROC)
+
+setwd("~/Documents/uci/2019Spring/STATS210C")
+mal <- read.delim("morbidity_class.txt",header=T)
+```
+
+
+
+```{r}
+#first plotting for the general question
+#Y: Q15 
+InMalplot = mal %>% mutate(treat = (treatment != "zcontrol"))
+#tmp = data.frame(mal %>% group_by(vn,treatment,Q15) %>% summarise(n=n()) %>% arrange(treatment,vn))
+plotin = data.frame(InMalplot %>% group_by(vn,treat,Q15) %>% summarise(n=n())) %>% mutate(Q15 = as.factor(Q15)) %>% arrange(treat,Q15,vn)
+
+
+plot_prop = data.frame(plotin %>% group_by(vn,treat) %>% mutate(prop = n/sum(n)))
+ggplot(plot_prop %>% filter(Q15==1), aes(x=vn, y=prop, fill = treat)) +
+  geom_bar(stat="identity",position=position_dodge()) + 
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal()
+#this is the main probability of malaria plot and it's relationship to treatment group or not over time (visit). It looks like with treatment   
+
+plot_prop_grp =  InMalplot %>% group_by(vn,treatment,Q15) %>% summarise(n=n()) %>% mutate(Q15 = as.factor(Q15)) %>% group_by(vn,treatment) %>% mutate(prop = n/sum(n))
+ggplot(plot_prop_grp %>% filter(Q15==1), aes(x=vn, y=prop, fill = treatment)) +
+  geom_bar(stat="identity",position=position_dodge()) + 
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal()
+# ggplot(plotin, aes(x=vn, y=n, fill = Q15)) +
+#   geom_bar(stat="identity",position=position_dodge()) +
+#   scale_fill_brewer(palette="Paired")+
+#   theme_minimal()+
+#   facet_wrap(~treat)
+
+#see the total number of measurement by feeding groups, no pattern differences suspected
+plotIn_Treat = InMalplot %>% group_by(vn,treatment,Q15) %>% summarise(n=n()) %>% mutate(Q15 = as.factor(Q15))
+ggplot(plotIn_Treat, aes(x=vn, y=n, fill = Q15)) +
+  geom_bar(stat="identity",position=position_dodge()) +
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal()+
+  facet_wrap(~treatment)
+
+#a lot of drop out except for control group, could contribute to estimates
+#however, didn't see the Y which is the proportion of malaria different with/without treatment is different between control group and treatment group. Therefore, I am not suspecting the missing data is due to children having malaria or not depending on they received treatment or not.
+```
+
+```{r}
+#check for number of missing values, repeated measures. Describe data characteristics, #of participants, number of observations for each participant. averages and sds for each observation. 
+
+ModelIn_Data = mal %>% dplyr::select(vn,Q15,age_at_time0,sex,ID,sin,cos) %>% na.omit() %>% arrange(ID,vn)
+#find missing values 
+
+NASub =  mal %>% dplyr::select(vn,Q15,age_at_time0,sex,ID,sin,cos) %>% filter_all(any_vars(is.na(.))) %>% arrange(ID,vn)
+
+#find total number of measurement by subjects
+try = ModelIn_Data %>% group_by(ID) %>% summarise(n=n())
+nrow(try %>% filter(n==15))
+
+mod1_age = glmer(Q15 ~ vn+age_at_time0+(1|ID), family=binomial,
+    data=ModelIn_Data, nAGQ = 25)
+#hetereogeneity of random intercept, 95% children have a basline risk of malaria varies from 0.10 to 0.7683. --> necessary to include random effect here
+exp(-0.4968-1.96*0.8651)/(1+exp(-0.4968-1.96*0.8651))
+exp(-0.4968+1.96*0.8651)/(1+exp(-0.4968+1.96*0.8651))
+
+mod1_time = glmer(Q15 ~ vn+(1|ID), family=binomial,
+    data=ModelIn_Data, nAGQ = 25)
+mod1_gender = glmer(Q15 ~ vn+sex+(1|ID), family=binomial,
+    data=ModelIn_Data, nAGQ = 25)
+anova(mod1_time,mod1_age)
+anova(mod1_time,mod1_gender)
+
+mod1_red = glmer(Q15 ~ vn+sex+age_at_time0+(1|ID), family=binomial,
+    data=ModelIn_Data, nAGQ = 25)
+mod1_full = glmer(Q15 ~ vn+sex*age_at_time0+(1|ID), family=binomial,
+    data=ModelIn_Data, nAGQ = 25)
+anova(mod1_red,mod1_full)
+try.effect = predictorEffects(mod1_red)
+plot(try.effect)
+#Figure 2 
+#age and gender is significant with/without the model 
+#however, the interaction is not significant. didn't expect age to vary with gender. as expected from the study design.
+#the random effect in age model 
+
+
+```
+
+```{r}
+ModelIn_Data = mal  %>% mutate(treat = (treatment != "zcontrol")) %>%
+  dplyr::select(vn,Q15,age_at_time0,sex,ID,treat,treatment) %>% na.omit() %>% arrange(ID,vn)
+summary(mod1_time)
+
+#the probability of getting malaria change over time
+mod2_red = glmer(Q15 ~ vn+treat+(1|ID), family=binomial,
+    data=ModelIn_Data, nAGQ = 25)
+mod2_full = glmer(Q15 ~ vn*treat+(1|ID), family=binomial,
+    data=ModelIn_Data, nAGQ = 25)
+anova(mod2_red,mod2_full) 
+
+
+ModelIn_15 = mal  %>% mutate(treat = (treatment != "zcontrol")) %>%
+  dplyr::select(vn,Q15,age_at_time0,sex,ID,treat,treatment) %>% filter(vn !=15) %>% na.omit() %>% arrange(ID,vn)
+mod2_full2 = glmer(Q15 ~ vn*treat+(1|ID), family=binomial,
+    data=ModelIn_15, nAGQ = 25)
+
+DataPlot = ModelIn_15 %>% mutate(modfit=fitted(mod2_full2))
+#appendix as fitted curves
+#figure 4 
+ggplot(DataPlot,aes(x=vn,y=modfit)) + 
+  geom_line(aes(group=ID,linetype = treat)) + 
+  theme_minimal()
+#mod2_red2 = glmer(Q15 ~ vn+treatment+(1|ID), family=binomial,data=ModelIn_Data, nAGQ = 25)
+
+
+#not significant, the probability of getting malaria doesn't change over time, and it's not the effet of the intervention group
+
+#quadratic doesn't fit the data, looks like the probability could go down 
+```
+
+
+```{r}
+#seasonal component 
+ModelIn_Data = mal %>% dplyr::select(vn,Q15,age_at_time0,sex,ID,sin,cos) %>% na.omit() %>% arrange(ID,vn)
+mod3_season = glmer(Q15 ~ sin+cos+(1|ID), family=binomial,data=ModelIn_Data, nAGQ = 25)
+mod3_season2 = glm(Q15 ~ sin+cos, family=binomial(link = "logit"),data=ModelIn_Data)
+
+#there is seasonal component. both sin and cos wave are significant here 
+#can plot fitted curve to look at seasonal trend 
+DataSeasonPlot = ModelIn_Data %>% mutate(modfit=fitted(mod3_season))
+
+#figure 5 
+ggplot(DataSeasonPlot,aes(x=vn,y=modfit)) + 
+  geom_line(aes(group=ID)) + 
+  theme_minimal()
+```
+seasonal component due to it being transmitted by mosquitos, which is more active during hotter weather such as summer months. 
+
+
+```{r}
+ModelIn_Data = mal  %>% mutate(treat = (treatment != "zcontrol")) %>%
+  dplyr::select(vn,Q15,age_at_time0,sex,ID,treat,school,sin,cos) %>% na.omit() %>% arrange(ID,vn)
+ModelInDat_control = ModelIn_Data %>% filter(treat == FALSE)
+
+#mod4_full = glmer(Q15 ~ vn+sex+age_at_time0+treat+(1|ID), family=binomial,ata=ModelIn_Data,nAGQ = 30)
+#look at effect after ruling out all the seasonal trend, age, school 
+#mod4_full2 = glmer(Q15 ~ vn+sex+age_at_time0+treat+school+sin+cos+vn*treat+(1|ID), family=binomial,data=ModelIn_Data,nAGQ = 30)
+
+mod4_fullC = glmer(Q15 ~ vn+sex+age_at_time0+school+sin+cos+(1|ID),family=binomial,data=ModelInDat_control,nAGQ = 30)
+
+#look at if proportion of malaria is different at different school at baseline
+
+#anova(mod4_full,mod4_full2)
+test = ModelInDat_control %>% dplyr::select(Q15,vn,ID,school) %>% mutate(modfit = fitted(mod4_fullC))
+ggplot(test, aes(d = Q15, m = modfit)) + geom_roc()
+auc(test$Q15,test$modfit)
+#try to estimate the fraction of children with malaria in the population from the model here 
+
+#in the dataset, the fraction of malaria was estimated at baseline/visit one. Therefore 
+tmp = mal %>% filter(vn ==1 ) %>% group_by(school,Q15) %>% summarise()
+mean(tmp$Q15)
+
+#therefore, I am estimating the fraction of children with malaria at each visit
+Prop_est = test %>% group_by(vn,school) %>%  summarise(meanProp = mean(modfit,na.omit = T),sd = sd(modfit)) 
+Prop = Prop_est %>% group_by(school) %>% summarise(Prop = mean(meanProp))
+mean(Prop$Prop)
+Prop_actual = data.frame(test %>% group_by(vn,school) %>%  summarise(Prop = mean(Q15,na.omit=T)))
+
+kable(test %>% group_by(school) %>%  summarise(meanProp = mean(modfit,na.omit = T),sd = sd(modfit)))
+#comparing 
+#this gives a very low estimation of population fraction of malaria
+
+tmp = mal %>% filter(vn ==15 )
+
+mod4_control = glmer(Q15 ~ vn+sex+age_at_time0+(1|ID), family=binomial,
+    data=ModelInDat_control,nAGQ=30)
+
+mod4_control2 = glmer(Q15 ~ vn+sex+age_at_time0+sin+cos+(1|ID), family=binomial,
+    data=ModelInDat_control,nAGQ=30)
+test2c = ModelInDat_control %>% dplyr::select(Q15,vn) %>% mutate(modfit = fitted(mod4_control2))
+auc(test2c$Q15,test2c$modfit)
+kable(anova(mod4_control,mod4_fullC))
+#use predict function to look at prediction for 7year old male in the control 
+
+#to look at how model fit using ROC for classification rate
+newdata = data.frame(vn = c(1:15),age_at_time0 = rep(7,15), ID = rep(1,15),sex = rep("boy",15))
+Predict_control = predict(mod4_control,newdata,type="response",allow.new.levels=T,re.form = ~(1|ID))
+
+test2 = ModelInDat_control %>% dplyr::select(Q15,vn) %>% mutate(modfit = fitted(mod4_control))
+ggplot(test2, aes(d = Q15, m = modfit)) + geom_roc()
+auc(test2$Q15,test2$modfit)
+#model fitting curve 
+
+##plotting the predicted value for 7year old male with confidence interval 
+plotdf <- predictInterval(mod4_control, newdata = newdata, type = "probability", 
+            stat = "median", n.sims = 1000)
+plotdf <- cbind(plotdf, newdata)
+
+ggplot(plotdf, aes(x = 1:15, y = fit)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = .15) +
+  geom_line() + 
+  ylim(c(0, 1)) 
+```
+
+
+$$
+Y_{iJ}= \beta_0+  \beta_lD_{il} + \beta_mM_{iJ}  + \beta_{m+}(M_{iJ}-3)^+ + \beta_{l2}D_{il}*M_{iJ} + \beta_{l3}D_{il}*(M_{iJ}-3)^+ +  e_{iJ}
+$$
